@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>オプション価格修正ツール</title>
+  <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@2.2.0/encoding.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', 'Hiragino Sans', sans-serif; background: #f5f7fa; color: #333; padding: 2rem; }
+    h1 { text-align: center; margin-bottom: 2rem; color: #2c3e50; }
+    .container { max-width: 800px; margin: 0 auto; }
+    .upload-section { background: #fff; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .upload-section h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+    .upload-section p { font-size: 0.85rem; color: #666; margin-bottom: 0.8rem; }
+    input[type="file"] { display: block; margin-bottom: 0.5rem; }
+    .status { font-size: 0.85rem; color: #27ae60; margin-top: 0.3rem; }
+    .status.error { color: #e74c3c; }
+    button#run { display: block; width: 100%; padding: 0.9rem; font-size: 1.1rem; background: #3498db; color: #fff; border: none; border-radius: 8px; cursor: pointer; margin-top: 1.5rem; }
+    button#run:hover { background: #2980b9; }
+    button#run:disabled { background: #bdc3c7; cursor: not-allowed; }
+    #result { background: #fff; border-radius: 8px; padding: 1.5rem; margin-top: 1rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); display: none; }
+    #result h2 { margin-bottom: 0.8rem; }
+    #result table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 1rem; }
+    #result th, #result td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; }
+    #result th { background: #f0f0f0; }
+    .changed { background: #fff9c4; }
+    button#download { padding: 0.7rem 2rem; font-size: 1rem; background: #27ae60; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+    button#download:hover { background: #219a52; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>オプション価格修正ツール</h1>
+
+    <div class="upload-section">
+      <h2>1. Product CSV</h2>
+      <p>D列: SKUコード / J列: 価格</p>
+      <input type="file" id="productFile" accept=".csv">
+      <div id="productStatus" class="status"></div>
+    </div>
+
+    <div class="upload-section">
+      <h2>2. Option CSV</h2>
+      <p>B列: sub-code / O列: subcode-price（修正対象）</p>
+      <input type="file" id="optionFile" accept=".csv">
+      <div id="optionStatus" class="status"></div>
+    </div>
+
+    <button id="run" disabled>価格を修正する</button>
+
+    <div id="result">
+      <h2>修正結果</h2>
+      <p id="summary"></p>
+      <table id="changeLog">
+        <thead><tr><th>行</th><th>sub-code</th><th>旧価格</th><th>新価格</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button id="download">修正済みCSVをダウンロード</button>
+    </div>
+  </div>
+
+  <script>
+    let productData = null;
+    let optionData = null;
+    let optionRows = null;
+    let outputBlob = null;
+
+    function readFileAsShiftJIS(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const codes = new Uint8Array(reader.result);
+          const detected = Encoding.detect(codes);
+          const unicodeArray = Encoding.convert(codes, { to: 'UNICODE', from: detected });
+          const text = Encoding.codeToString(unicodeArray);
+          resolve(text);
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    function parseCSV(text) {
+      const rows = [];
+      let current = '';
+      let inQuotes = false;
+      let row = [];
+
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            if (i + 1 < text.length && text[i + 1] === '"') {
+              current += '"';
+              i++;
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            current += ch;
+          }
+        } else {
+          if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ',') {
+            row.push(current);
+            current = '';
+          } else if (ch === '\r') {
+            // skip
+          } else if (ch === '\n') {
+            row.push(current);
+            current = '';
+            rows.push(row);
+            row = [];
+          } else {
+            current += ch;
+          }
+        }
+      }
+      if (current || row.length > 0) {
+        row.push(current);
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    function buildCSVText(rows) {
+      return rows.map(row =>
+        row.map(cell => {
+          if (cell.includes(',') || cell.includes('"') || cell.includes('\n')) {
+            return '"' + cell.replace(/"/g, '""') + '"';
+          }
+          return cell;
+        }).join(',')
+      ).join('\r\n');
+    }
+
+    document.getElementById('productFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await readFileAsShiftJIS(file);
+        const rows = parseCSV(text);
+        productData = {};
+        let count = 0;
+        for (let i = 1; i < rows.length; i++) {
+          const sku = (rows[i][3] || '').trim();  // D列 (index 3)
+          const price = (rows[i][9] || '').trim(); // J列 (index 9)
+          if (sku) {
+            productData[sku] = price;
+            count++;
+          }
+        }
+        document.getElementById('productStatus').textContent = `${count} 件のSKUを読み込みました`;
+        document.getElementById('productStatus').className = 'status';
+      } catch (err) {
+        document.getElementById('productStatus').textContent = 'エラー: ' + err.message;
+        document.getElementById('productStatus').className = 'status error';
+      }
+      updateRunButton();
+    });
+
+    document.getElementById('optionFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await readFileAsShiftJIS(file);
+        optionRows = parseCSV(text);
+        document.getElementById('optionStatus').textContent = `${optionRows.length - 1} 行を読み込みました`;
+        document.getElementById('optionStatus').className = 'status';
+      } catch (err) {
+        document.getElementById('optionStatus').textContent = 'エラー: ' + err.message;
+        document.getElementById('optionStatus').className = 'status error';
+      }
+      updateRunButton();
+    });
+
+    function updateRunButton() {
+      document.getElementById('run').disabled = !(productData && optionRows);
+    }
+
+    document.getElementById('run').addEventListener('click', () => {
+      if (!productData || !optionRows) return;
+
+      const tbody = document.querySelector('#changeLog tbody');
+      tbody.innerHTML = '';
+      let changedCount = 0;
+
+      for (let i = 1; i < optionRows.length; i++) {
+        const row = optionRows[i];
+        const subCode = (row[1] || '').trim();  // B列 (index 1)
+        const oldPrice = (row[14] || '').trim(); // O列 (index 14)
+
+        if (subCode && productData.hasOwnProperty(subCode)) {
+          const newPrice = productData[subCode];
+          if (oldPrice !== newPrice) {
+            row[14] = newPrice;
+            changedCount++;
+            const tr = document.createElement('tr');
+            tr.className = 'changed';
+            tr.innerHTML = `<td>${i + 1}</td><td>${subCode}</td><td>${oldPrice}</td><td>${newPrice}</td>`;
+            tbody.appendChild(tr);
+          }
+        }
+      }
+
+      document.getElementById('summary').textContent = `${changedCount} 件の価格を修正しました`;
+
+      const csvText = buildCSVText(optionRows);
+      const sjisArray = Encoding.convert(Encoding.stringToCode(csvText), { to: 'SJIS', from: 'UNICODE' });
+      outputBlob = new Blob([new Uint8Array(sjisArray)], { type: 'text/csv' });
+
+      document.getElementById('result').style.display = 'block';
+    });
+
+    document.getElementById('download').addEventListener('click', () => {
+      if (!outputBlob) return;
+      const url = URL.createObjectURL(outputBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'option_fixed.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>
