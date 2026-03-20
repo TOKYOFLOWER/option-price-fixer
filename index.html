@@ -182,7 +182,7 @@
         <div class="step-number">1</div>
         <div class="step-title">Product CSV を選択</div>
       </div>
-      <p class="step-desc">D列(index3): SKUコード / J列(index9): 販売価格</p>
+      <p class="step-desc">ヘッダー「SKUコード」列 / 「楽天市場SKU1号店通常購入販売価格」列を使用</p>
       <div class="drop-zone" id="dropProduct">
         ここにファイルをドラッグ＆ドロップ、またはクリックして選択
         <input type="file" id="fileProduct" accept=".csv">
@@ -196,7 +196,7 @@
         <div class="step-number">2</div>
         <div class="step-title">Option CSV を選択</div>
       </div>
-      <p class="step-desc">B列(index1): sub-code / O列(index14): subcode-price（修正対象）</p>
+      <p class="step-desc">ヘッダー「sub-code」列 / 「subcode-price」列（修正対象）</p>
       <div class="drop-zone" id="dropOption">
         ここにファイルをドラッグ＆ドロップ、またはクリックして選択
         <input type="file" id="fileOption" accept=".csv">
@@ -304,15 +304,23 @@
       try {
         const text = await readFileAsText(file);
         const rows = parseCSV(text);
+        if (rows.length === 0) throw new Error('CSVが空です');
+        const header = rows[0].map(h => h.trim());
+        const skuIdx = header.indexOf('SKUコード');
+        const priceIdx = header.indexOf('楽天市場SKU1号店通常購入販売価格');
+        if (skuIdx === -1) throw new Error('ヘッダーに「SKUコード」列が見つかりません');
+        if (priceIdx === -1) throw new Error('ヘッダーに「楽天市場SKU1号店通常購入販売価格」列が見つかりません');
         productMap = {};
         let count = 0;
         for (let i = 1; i < rows.length; i++) {
-          const sku = (rows[i][3] || '').trim();
-          const price = (rows[i][9] || '').trim();
+          const sku = (rows[i][skuIdx] || '').trim();
+          const price = (rows[i][priceIdx] || '').trim();
           if (sku) { productMap[sku] = price; count++; }
         }
         info.textContent = file.name + ' - ' + count + ' 件のSKUを読み込み';
+        info.style.color = '';
       } catch (e) {
+        productMap = null;
         info.textContent = 'エラー: ' + e.message;
         info.style.color = '#ef4444';
       }
@@ -320,12 +328,25 @@
     });
 
     /* ---- Load Option CSV ---- */
+    let optSubCodeIdx = -1;
+    let optPriceIdx = -1;
+
     setupDropZone('dropOption', 'fileOption', 'infoOption', async (file, info) => {
       try {
         const text = await readFileAsText(file);
         optionRows = parseCSV(text);
+        if (optionRows.length === 0) throw new Error('CSVが空です');
+        const header = optionRows[0].map(h => h.trim());
+        optSubCodeIdx = header.indexOf('sub-code');
+        optPriceIdx = header.indexOf('subcode-price');
+        if (optSubCodeIdx === -1) throw new Error('ヘッダーに「sub-code」列が見つかりません');
+        if (optPriceIdx === -1) throw new Error('ヘッダーに「subcode-price」列が見つかりません');
         info.textContent = file.name + ' - ' + (optionRows.length - 1) + ' 行を読み込み';
+        info.style.color = '';
       } catch (e) {
+        optionRows = null;
+        optSubCodeIdx = -1;
+        optPriceIdx = -1;
         info.textContent = 'エラー: ' + e.message;
         info.style.color = '#ef4444';
       }
@@ -346,13 +367,13 @@
 
       for (let i = 1; i < optionRows.length; i++) {
         const row = optionRows[i];
-        const subCode = (row[1] || '').trim();
-        const oldPrice = (row[14] || '').trim();
+        const subCode = (row[optSubCodeIdx] || '').trim();
+        const oldPrice = (row[optPriceIdx] || '').trim();
 
         if (subCode && productMap.hasOwnProperty(subCode)) {
           const newPrice = productMap[subCode];
           if (oldPrice !== newPrice) {
-            row[14] = newPrice;
+            row[optPriceIdx] = newPrice;
             changed++;
             const tr = document.createElement('tr');
             tr.innerHTML =
