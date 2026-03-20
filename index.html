@@ -182,7 +182,7 @@
         <div class="step-number">1</div>
         <div class="step-title">Product CSV を選択</div>
       </div>
-      <p class="step-desc">ヘッダー「SKUコード」列 / 「楽天市場SKU1号店通常購入販売価格」列を使用</p>
+      <p class="step-desc">「SKUコード」列 / 「楽天市場SKU1号店通常購入販売価格」列 / 「楽天市場SKU1号店通常購入二重価格」列を使用</p>
       <div class="drop-zone" id="dropProduct">
         ここにファイルをドラッグ＆ドロップ、またはクリックして選択
         <input type="file" id="fileProduct" accept=".csv">
@@ -232,6 +232,7 @@
 
   <script>
     let productMap = null;
+    let productMapQ = null;
     let optionRows = null;
     let outputBlob = null;
 
@@ -308,19 +309,24 @@
         const header = rows[0].map(h => h.trim());
         const skuIdx = header.indexOf('SKUコード');
         const priceIdx = header.indexOf('楽天市場SKU1号店通常購入販売価格');
+        const priceQIdx = header.indexOf('楽天市場SKU1号店通常購入二重価格');
         if (skuIdx === -1) throw new Error('ヘッダーに「SKUコード」列が見つかりません');
         if (priceIdx === -1) throw new Error('ヘッダーに「楽天市場SKU1号店通常購入販売価格」列が見つかりません');
+        if (priceQIdx === -1) throw new Error('ヘッダーに「楽天市場SKU1号店通常購入二重価格」列が見つかりません');
         productMap = {};
+        productMapQ = {};
         let count = 0;
         for (let i = 1; i < rows.length; i++) {
           const sku = (rows[i][skuIdx] || '').trim();
           const price = (rows[i][priceIdx] || '').trim();
-          if (sku) { productMap[sku] = price; count++; }
+          const priceQ = (rows[i][priceQIdx] || '').trim();
+          if (sku) { productMap[sku] = price; productMapQ[sku] = priceQ; count++; }
         }
         info.textContent = file.name + ' - ' + count + ' 件のSKUを読み込み';
         info.style.color = '';
       } catch (e) {
         productMap = null;
+        productMapQ = null;
         info.textContent = 'エラー: ' + e.message;
         info.style.color = '#ef4444';
       }
@@ -354,7 +360,7 @@
     });
 
     function updateBtn() {
-      document.getElementById('runBtn').disabled = !(productMap && optionRows);
+      document.getElementById('runBtn').disabled = !(productMap && productMapQ && optionRows);
     }
 
     /* ---- Run ---- */
@@ -372,8 +378,8 @@
         const oldPrice = (row[optPriceIdx] || '').trim();
 
         if (subCode && productMap.hasOwnProperty(subCode)) {
-          const newPrice = productMap[subCode];
           const isEmpty = oldPrice === '';
+          const newPrice = isEmpty ? productMapQ[subCode] : productMap[subCode];
           if (isEmpty || oldPrice !== newPrice) {
             row[optPriceIdx] = newPrice;
             changed++;
