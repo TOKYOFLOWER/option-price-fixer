@@ -364,6 +364,7 @@
       const tbody = document.querySelector('#diffTable tbody');
       tbody.innerHTML = '';
       let changed = 0;
+      const changedRows = [optionRows[0]];
 
       for (let i = 1; i < optionRows.length; i++) {
         const row = optionRows[i];
@@ -375,6 +376,7 @@
           if (oldPrice !== newPrice) {
             row[optPriceIdx] = newPrice;
             changed++;
+            changedRows.push(row);
             const tr = document.createElement('tr');
             tr.innerHTML =
               '<td>' + (i + 1) + '</td>' +
@@ -389,13 +391,17 @@
       document.getElementById('summary').innerHTML =
         '<span>' + changed + '</span> 件の価格を修正しました（全 ' + (optionRows.length - 1) + ' 行中）';
 
+      const downloadBtn = document.getElementById('downloadBtn');
       if (changed === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="no-match">変更対象はありませんでした</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="no-match">修正が必要な行はありませんでした</td></tr>';
+        outputBlob = null;
+        downloadBtn.style.display = 'none';
+      } else {
+        const csv = toCSVText(changedRows);
+        const sjis = Encoding.convert(Encoding.stringToCode(csv), { to: 'SJIS', from: 'UNICODE' });
+        outputBlob = new Blob([new Uint8Array(sjis)], { type: 'text/csv' });
+        downloadBtn.style.display = '';
       }
-
-      const csv = toCSVText(optionRows);
-      const sjis = Encoding.convert(Encoding.stringToCode(csv), { to: 'SJIS', from: 'UNICODE' });
-      outputBlob = new Blob([new Uint8Array(sjis)], { type: 'text/csv' });
 
       document.getElementById('resultCard').classList.add('visible');
     });
