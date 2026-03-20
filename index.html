@@ -373,7 +373,8 @@
 
         if (subCode && productMap.hasOwnProperty(subCode)) {
           const newPrice = productMap[subCode];
-          if (oldPrice !== newPrice) {
+          const isEmpty = oldPrice === '';
+          if (isEmpty || oldPrice !== newPrice) {
             row[optPriceIdx] = newPrice;
             changed++;
             changedRows.push(row);
@@ -381,7 +382,7 @@
             tr.innerHTML =
               '<td>' + (i + 1) + '</td>' +
               '<td>' + subCode + '</td>' +
-              '<td class="old-price">' + oldPrice + '</td>' +
+              '<td class="old-price">' + (isEmpty ? '（空欄）' : oldPrice) + '</td>' +
               '<td class="new-price">' + newPrice + '</td>';
             tbody.appendChild(tr);
           }
